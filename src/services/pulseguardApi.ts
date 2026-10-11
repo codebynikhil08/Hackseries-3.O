@@ -5,7 +5,19 @@ import type {
   AnomalyEvent
 } from '../types/pulseguard';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+const getBaseUrl = (): string => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  if (typeof window !== 'undefined') {
+    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+      return '/api';
+    }
+  }
+  return 'http://127.0.0.1:8000/api';
+};
+
+const API_BASE_URL = getBaseUrl();
 
 class PulseGuardApiService {
   private baseUrl: string;

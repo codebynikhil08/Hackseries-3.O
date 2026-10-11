@@ -25,15 +25,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS configuration
+# CORS configuration (supports local dev and cloud deployment origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
+    allow_origin_regex=r".*",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -341,3 +337,27 @@ def inject_scenario(request: ScenarioInjectRequest):
         patient.inject(ev_name)
 
     return {"status": "success", "injected_scenario": ev_name, "raw_input": name}
+
+
+# Optional: Serve production frontend SPA if dist/ exists
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+DIST_DIR = (BACKEND_DIR.parent / "dist").resolve()
+if not DIST_DIR.exists():
+    DIST_DIR = (BACKEND_DIR / "dist").resolve()
+
+if DIST_DIR.exists():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=404, detail="API route not found")
+        target = DIST_DIR / full_path
+        if target.exists() and target.is_file():
+            return FileResponse(target)
+        return FileResponse(DIST_DIR / "index.html")
+
