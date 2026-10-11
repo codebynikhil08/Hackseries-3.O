@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Health Anomaly Monitor</title>
+<style>
+/* Design tokens: the whole look is driven from here, so a theme can be swapped without touching layout. */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --line: #e2e5ea;
+  --text: #14171c; --muted: #5b6472; --accent: #3056d3;
+  --ok: #1f8a4c; --watch: #b7791f; --warn: #c2410c; --alert: #c81e1e;
+  --ok-bg: #e8f5ee; --watch-bg: #fdf5e6; --warn-bg: #fff1e8; --alert-bg: #fdeaea;
+  --band: rgba(48, 86, 211, .10);
+  --radius: 14px; --gap: 16px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1116; --surface: #161a21; --surface-2: #1d222b; --line: #2a303b;
+  --text: #e8ebf0; --muted: #98a2b3; --accent: #7b9cff;
+  --ok: #4ade80; --watch: #fbbf24; --warn: #fb923c; --alert: #f87171;
+  --ok-bg: #12261b; --watch-bg: #2a2110; --warn-bg: #2b1a10; --alert-bg: #2d1414;
+  --band: rgba(123, 156, 255, .14);
+}}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --surface: #161a21; --surface-2: #1d222b; --line: #2a303b;
+  --text: #e8ebf0; --muted: #98a2b3; --accent: #7b9cff;
+  --ok: #4ade80; --watch: #fbbf24; --warn: #fb923c; --alert: #f87171;
+  --ok-bg: #12261b; --watch-bg: #2a2110; --warn-bg: #2b1a10; --alert-bg: #2d1414;
+  --band: rgba(123, 156, 255, .14);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+header .live { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.dot.off { background: var(--alert); }
+button { font: inherit; color: inherit; cursor: pointer; }
+.layout { padding: var(--gap) 20px 40px; }
+@media (max-width: 900px) { .layout { padding: 12px 16px 32px; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+
+
+/* status badges: icon + text, never colour alone */
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.badge::before { font-size: 11px; }
+.t-normal { color: var(--ok); background: var(--ok-bg); } .t-normal::before { content: "●"; }
+.t-learning { color: var(--muted); background: var(--surface-2); } .t-learning::before { content: "○"; }
+.t-watch { color: var(--watch); background: var(--watch-bg); } .t-watch::before { content: "◆"; }
+.t-warning { color: var(--warn); background: var(--warn-bg); } .t-warning::before { content: "▲"; }
+.t-alert { color: var(--alert); background: var(--alert-bg); } .t-alert::before { content: "■"; }
+
+/* main */
+.main { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.banner { border-radius: var(--radius); padding: 18px 20px; display: flex; gap: 16px; align-items: center; border: 1px solid var(--line); background: var(--surface); transition: background .3s, border-color .3s; }
+.banner .icon { font-size: 28px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: var(--surface-2); flex: none; }
+.banner .title { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+.banner .sub { color: var(--muted); }
+.banner.alert { background: var(--alert-bg); border-color: var(--alert); }
+.banner.alert .title, .banner.alert .icon { color: var(--alert); }
+.banner.warning { background: var(--warn-bg); border-color: var(--warn); }
+.banner.warning .title, .banner.warning .icon { color: var(--warn); }
+.banner.watch .title, .banner.watch .icon { color: var(--watch); }
+.banner.normal .title, .banner.normal .icon { color: var(--ok); }
+@media (prefers-reduced-motion: no-preference) { .banner.alert .icon { animation: pulse 1.2s ease-in-out infinite; } }
+@keyframes pulse { 50% { transform: scale(1.08); } }
+
+/* one signal per row: the trace spans the full width */
+.tiles { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
+        display: grid; grid-template-columns: 170px 1fr; grid-template-rows: auto auto; column-gap: 16px; align-items: center; }
+.tile .lab { grid-column: 1; grid-row: 1; }
+.tile .val { grid-column: 1; grid-row: 2; }
+.tile canvas { grid-column: 2; grid-row: 1 / 3; }
+@media (max-width: 600px) { .tile { grid-template-columns: 1fr; } .tile canvas { grid-column: 1; grid-row: 3; } }
+.tile.off { border-color: var(--alert); }
+.tile .lab { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+.tile .val { font: 600 26px/1.2 var(--mono); letter-spacing: -.02em; }
+.tile .val small { font: 500 12px var(--font); color: var(--muted); margin-left: 4px; }
+.tile canvas { width: 100%; height: 72px; display: block; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+.bar { display: grid; grid-template-columns: 120px 1fr 64px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
+.bar .track { position: relative; height: 10px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.bar .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 6px; transition: width .4s; }
+.bar .fill.hi { background: var(--alert); } .bar .fill.mid { background: var(--watch); }
+.bar .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: .5; }
+.bar .num { font-family: var(--mono); text-align: right; color: var(--muted); }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+.inject { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.inject button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; font-weight: 600; }
+.inject button.primary { background: var(--alert); border-color: var(--alert); color: #fff; }
+.inject button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inject label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; margin-left: 4px; }
+.msg { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; font-size: 13px; }
+.log li { display: grid; grid-template-columns: 70px 50px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.log time { color: var(--muted); font-family: var(--mono); }
+.truth { font-size: 12px; color: var(--muted); }
+
+/* charts */
+.chart { width: 100%; display: block; }
+#scatter { height: 220px; } #act { height: 56px; } #irr { height: 40px; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.big { font: 600 20px/1.3 var(--mono); margin: 6px 0 2px; }
+.fcrow { display: grid; grid-template-columns: 120px 1fr 56px; gap: 10px; align-items: center; margin: 6px 0; font-size: 13px; }
+.fcrow canvas { height: 36px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+@media (max-width: 1100px) { .grid3 { grid-template-columns: 1fr; } }
+.grid3 h3 { font-size: 13px; margin: 0 0 6px; font-weight: 650; }
+#results .bar { grid-template-columns: 110px 1fr 92px; }
+#results .num, .dn .num { white-space: nowrap; }
+.dn { grid-template-columns: 120px 1fr auto; }
+.dn { display: grid; grid-template-columns: 120px 1fr 110px; gap: 10px; align-items: center; margin: 8px 0; font-size: 13px; }
+.dn .pair { display: grid; gap: 3px; }
+.dn .track { height: 8px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.dn .fill { height: 100%; background: var(--accent); border-radius: 5px; }
+.dn .fill.night { opacity: .45; }
+.dn .num { font-family: var(--mono); color: var(--muted); text-align: right; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Health Anomaly Monitor</h1>
+  <span class="live" aria-live="polite"><span class="dot" id="conn"></span><span id="connText">Connecting…</span></span>
+</header>
+
+<div class="layout">
+  <main class="main">
+    <section class="banner normal" id="banner" aria-live="assertive">
+      <div class="icon" id="bIcon" aria-hidden="true">●</div>
+      <div><div class="title" id="bTitle">Loading…</div><div class="sub" id="bSub"></div></div>
+    </section>
+
+    <section class="tiles" id="tiles" aria-label="Live signals"></section>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Why · distance from this person's normal</h2>
+        <div id="why"></div>
+        <div class="note">Standard deviations from the person's own baseline for their current activity and time of day. Marks: watch 3.5, alert 5.</div>
+      </section>
+      <section class="card">
+        <h2>Early warning · next 20–60 s</h2>
+        <div id="fc"></div>
+        <div class="note">Probability the event starts within its horizon. Mark = warning threshold (≈1 false warning per hour).</div>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Demo · inject an event</h2>
+        <div class="inject" id="inject"></div>
+        <div class="msg" id="injMsg" aria-live="polite"></div>
+        <div class="truth" id="truth"></div>
+      </section>
+      <section class="card">
+        <h2>Alert log</h2>
+        <ul class="log" id="log"></ul>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Heart rate vs movement · last 3 min</h2>
+        <canvas class="chart" id="scatter" role="img" aria-label="Heart rate plotted against movement"></canvas>
+        <div class="legend"><span><i style="background:var(--band)"></i>This person's normal at that movement</span>
+          <span><i style="background:var(--accent)"></i>Stable</span><span><i style="background:var(--warn)"></i>Early warning</span>
+          <span><i style="background:var(--alert)"></i>Alert</span></div>
+        <div class="note">A fast heart rate during exercise sits inside the band; the same rate while still sits far above it.</div>
+      </section>
+      <section class="card">
+        <h2>Day vs night · resting values</h2>
+        <div id="dn"></div>
+        <div class="note">Learned value at rest for this person. Upper bar = day, lower (lighter) bar = night.</div>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Activity · last 3 min</h2>
+        <canvas class="chart" id="act" role="img" aria-label="Activity level over the last 3 minutes"></canvas>
+        <div class="legend"><span>Bar height: still ▁ · walking ▃ · exercise ▅ · fall impact █ (red)</span></div>
+        <div class="msg" id="actTxt"></div>
+      </section>
+      <section class="card">
+        <h2>Heart rhythm · irregular beats</h2>
+        <canvas class="chart" id="irr" role="img" aria-label="Seconds the watch flagged an irregular rhythm"></canvas>
+        <div class="msg" id="irrTxt"></div>
+        <div class="note">Each red tick = a second the watch flagged an irregular rhythm. Alert when 6 of the last 10 seconds are flagged.</div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Early warning · probability over the last 3 min</h2>
+      <div id="fcHist"></div>
+      <div class="note">Dashed line = warning threshold (each row is scaled to its own threshold). A warning needs 3 seconds in a row above it.</div>
+    </section>
+
+    <section class="card">
+      <h2>Test results · offline evaluation on simulated data</h2>
+      <div class="grid3" id="results"></div>
+      <div class="note">From <code>scorecard.py</code> (3 seeds × 3 patients, 77 events) and <code>forecast.py</code> (10 never-seen test people). Simulated data, not real patients.</div>
+    </section>
+  </main>
+</div>
+
+<script>
+const SIG = [
+  ["hr", "Heart rate", "bpm", 0], ["spo2", "SpO₂", "%", 1], ["rr", "Breathing", "/min", 1],
+  ["temp", "Skin temp", "°C", 2], ["hrv", "HRV", "ms", 0], ["pi", "Pulse strength", "%", 2], ["accel", "Movement", "g", 2],
+];
+const LABEL = { normal: "Stable", learning: "Learning", watch: "Watch", warning: "Early warning", alert: "Alert" };
+const ICON = { normal: "●", learning: "○", watch: "◆", warning: "▲", alert: "■" };
+const EV = { cardiac_spike: "Heart-rate spike", hypoxia: "Oxygen drop", fever: "Fever", fall: "Fall", afib: "Irregular rhythm (AFib)" };
+const ZNAME = { hr: "Heart rate", spo2: "SpO₂", temp: "Skin temp", rr: "Breathing", hrv: "HRV", pi: "Pulse strength" };
+const HIST = 180;
+let data = { patients: [] }, hist = {}, sel = null;
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function badge(tier) { return `<span class="badge t-${tier}">${LABEL[tier] || tier}</span>`; }
+function fmt(v, d) { return v == null ? "–" : Number(v).toFixed(d); }
+
+function renderBanner(p) {
+  const b = $("banner"); b.className = "banner " + p.tier;
+  $("bIcon").textContent = ICON[p.tier] || "●";
+  const warn = Object.entries(p.forecast).filter(([, f]) => f.warning).map(([e, f]) => `${EV[e]} likely within ${f.horizon} s`);
+  $("bTitle").textContent = `${p.name} · ${LABEL[p.tier]}`;
+  $("bSub").textContent = p.tier === "alert" ? p.reason
+    : p.tier === "warning" ? warn.join(" · ")
+    : p.tier === "watch" ? "Some readings are drifting from this person's normal; not yet an alert."
+    : `All signals within this person's normal.${p.idle_min >= 10 ? ` No movement for ${p.idle_min} min.` : ""}`;
+}
+
+function renderTiles(p) {
+  const tiles = $("tiles");
+  if (tiles.dataset.pid !== p.pid) {
+    tiles.dataset.pid = p.pid;
+    tiles.innerHTML = SIG.map(([k, n, u]) => `<div class="tile" id="tile-${k}"><div class="lab"><span id="n-${k}">${n}</span><span id="z-${k}"></span></div>
+      <div class="val" id="v-${k}">–<small>${u}</small></div><canvas id="c-${k}" aria-hidden="true"></canvas></div>`).join("");
+  }
+  for (const [k, , u, d] of SIG) {
+    const z = p.z[k];
+    $("v-" + k).innerHTML = `${fmt(p.reading[k], d)}<small>${u}</small>`;
+    $("z-" + k).textContent = z != null && z >= 3.5 ? `▲ ${z}σ` : "";
+    $("tile-" + k).classList.toggle("off", z != null && z >= 5);
+    if (k === "hr" && p.reading.irregular) $("z-hr").textContent = "irregular beat";
+    draw(k, hist[p.pid] || []);
+  }
+  const h = hist[p.pid] || [];
+  if (h.length > 30) {   // temperature trend over the visible window, per 10 minutes
+    const s = slope(h.map(x => x.temp)) * 600, arrow = s > 0.05 ? "↗" : s < -0.05 ? "↘" : "→";
+    $("n-temp").textContent = `Skin temp · ${arrow} ${s >= 0 ? "+" : ""}${s.toFixed(2)} °C/10 min`;
+  }
+}
+
+const TIERC = t => t === "alert" ? css("--alert") : t === "warning" ? css("--warn") : css("--accent");
+
+function renderScatter(h) {
+  const [g, w, ht] = canvas($("scatter"));
+  if (h.length < 2) return;
+  const L = 36, B = 22, T = 8, R = 8, ax = x => Math.min(x.accel, 1.5);   // cap so a fall spike doesn't squash the plot
+  const exp = h.filter(x => x.exp_hr);
+  const xmax = Math.max(0.8, ...h.map(ax));
+  let lo = Math.min(...h.map(x => x.hr), ...exp.map(x => x.exp_hr[0] - 2 * x.exp_hr[1]));
+  let hi = Math.max(...h.map(x => x.hr), ...exp.map(x => x.exp_hr[0] + 2 * x.exp_hr[1]));
+  lo = Math.floor(lo / 10) * 10; hi = Math.ceil(hi / 10) * 10 || lo + 10;
+  const X = a => L + a / xmax * (w - L - R), Y = v => ht - B - (v - lo) / (hi - lo) * (ht - B - T);
+  g.strokeStyle = css("--line"); g.beginPath(); g.moveTo(L, T); g.lineTo(L, ht - B); g.lineTo(w - R, ht - B); g.stroke();
+  g.fillStyle = css("--muted"); g.font = "11px " + css("--font");
+  g.fillText(hi, 4, T + 9); g.fillText(lo, 4, ht - B); g.fillText("bpm", 4, (T + ht - B) / 2);
+  g.fillText("still", L, ht - 6); g.textAlign = "right"; g.fillText(`movement → ${xmax.toFixed(1)} g`, w - R, ht - 6); g.textAlign = "left";
+  g.fillStyle = css("--band");                                       // normal band at each movement level seen
+  exp.forEach(x => g.fillRect(X(ax(x)) - 3, Y(x.exp_hr[0] + 2 * x.exp_hr[1]), 6, 4 * x.exp_hr[1] / (hi - lo) * (ht - B - T)));
+  h.forEach((x, i) => {
+    const last = i === h.length - 1;
+    g.fillStyle = TIERC(x.tier); g.beginPath(); g.arc(X(ax(x)), Y(x.hr), last ? 5 : 2.5, 0, 7); g.fill();
+    if (last) { g.strokeStyle = css("--text"); g.lineWidth = 1.5; g.stroke(); }
+  });
+}
+
+function renderDayNight(p) {
+  const r = p.resting || {};
+  if (!r.day || !r.night) { $("dn").innerHTML = `<div class="note">Still learning day and night baselines…</div>`; return; }
+  const rows = [["hr", "Resting heart rate", "bpm", 0], ["rr", "Breathing", "/min", 1], ["hrv", "HRV", "ms", 0], ["temp", "Skin temp", "°C", 2]];
+  const dip = r.day.hr - r.night.hr;
+  $("dn").innerHTML = `<div class="big">Night-time heart-rate dip: ${dip.toFixed(0)} bpm (${(dip / r.day.hr * 100).toFixed(0)}%)</div>` +
+    rows.map(([k, n, u, d]) => {
+      const a = r.day[k], b = r.night[k], m = Math.max(a, b), diff = b - a;
+      return `<div class="dn"><span>${n}</span><div class="pair" role="img" aria-label="${n}: day ${a.toFixed(d)}, night ${b.toFixed(d)} ${u}">
+        <div class="track"><div class="fill" style="width:${a / m * 100}%"></div></div>
+        <div class="track"><div class="fill night" style="width:${b / m * 100}%"></div></div></div>
+        <span class="num">${a.toFixed(d)} → ${b.toFixed(d)} ${u}<br>night ${diff >= 0 ? "+" : ""}${diff.toFixed(d)}</span></div>`;
+    }).join("");
+}
+
+const ACT = ["Still", "Walking", "Exercise", "Fall impact"];
+const level = a => a < 0.1 ? 0 : a < 0.7 ? 1 : a < 2.5 ? 2 : 3;   // same cut-offs as the detector's wording
+
+function renderActivity(h, p) {
+  const [g, w, ht] = canvas($("act"));
+  const bw = w / HIST, off = HIST - h.length, n = [0, 0, 0, 0];
+  h.forEach((x, i) => {
+    const l = level(x.accel); n[l]++;
+    g.fillStyle = l === 3 ? css("--alert") : css("--accent"); g.globalAlpha = l === 3 ? 1 : 0.35 + 0.2 * l;
+    const bh = (l + 1) / 4 * ht; g.fillRect((i + off) * bw, ht - bh, Math.max(1, bw - 0.5), bh);
+  });
+  g.globalAlpha = 1;
+  $("actTxt").textContent = `Now: ${ACT[level(p.reading.accel)]} · last 3 min: still ${n[0]} s, walking ${n[1]} s, exercise ${n[2]} s` +
+    (n[3] ? `, ${n[3]} fall impact` : "") + ` · no movement for ${p.idle_min} min (welfare alert at 30 min, daytime)`;
+}
+
+function renderIrregular(h) {
+  const [g, w, ht] = canvas($("irr"));
+  const bw = w / HIST, off = HIST - h.length;
+  g.strokeStyle = css("--line"); g.beginPath(); g.moveTo(0, ht - 1); g.lineTo(w, ht - 1); g.stroke();
+  g.fillStyle = css("--alert");
+  h.forEach((x, i) => { if (x.irr) g.fillRect((i + off) * bw, 4, Math.max(2, bw - 0.5), ht - 6); });
+  const last10 = h.slice(-10).filter(x => x.irr).length, total = h.filter(x => x.irr).length;
+  $("irrTxt").textContent = `${last10} of the last 10 s flagged · ${total} s in the last 3 min`;
+}
+
+function renderFcHist(h, p) {
+  const evs = Object.keys(p.forecast);
+  if (!evs.length) { $("fcHist").innerHTML = `<div class="note">Collecting 5 minutes of history…</div>`; return; }
+  if ($("fcHist").dataset.ready !== evs.join()) {
+    $("fcHist").dataset.ready = evs.join();
+    $("fcHist").innerHTML = evs.map(e => `<div class="fcrow"><span>${EV[e].replace(" (AFib)", "")}</span>
+      <canvas class="chart" id="fh-${e}" role="img" aria-label="${EV[e]} probability over time"></canvas><span class="num" id="fhv-${e}"></span></div>`).join("");
+  }
+  const bw = HIST - 1;
+  for (const e of evs) {
+    const [g, w, ht] = canvas($("fh-" + e)), thr = p.forecast[e].thr, off = HIST - h.length;
+    const top = Math.max(2.5 * thr, ...h.map(x => x["fc_" + e] ?? 0));   // thresholds are a few %, so scale to them
+    const X = i => (i + off) / bw * w, Y = v => ht - 2 - v / top * (ht - 4);
+    g.strokeStyle = css("--muted"); g.setLineDash([4, 3]); g.beginPath(); g.moveTo(0, Y(thr)); g.lineTo(w, Y(thr)); g.stroke(); g.setLineDash([]);
+    g.lineWidth = 1.6; g.lineJoin = "round";
+    for (let i = 1; i < h.length; i++) {
+      const a = h[i - 1]["fc_" + e], b = h[i]["fc_" + e];
+      if (a == null || b == null) continue;
+      g.strokeStyle = b >= thr ? css("--warn") : css("--accent");
+      g.beginPath(); g.moveTo(X(i - 1), Y(a)); g.lineTo(X(i), Y(b)); g.stroke();
+    }
+    $("fhv-" + e).textContent = `${Math.round(p.forecast[e].p * 100)}%`;
+  }
+}
+
+// ponytail: copied from the last offline runs (PROGRESS.md, Stage 5c); re-copy after retraining
+const RESULTS = {
+  latency: [["Fall", 0], ["Irregular rhythm", 2.0], ["Heart-rate spike", 2.0], ["Oxygen drop", 6.9], ["Fever", 18.2]],
+  detectors: [["Rules only", 100, 98.7, 0], ["ML only", 69, 100, 36], ["Rules + ML (live)", 100, 100, 0]],
+  forecast: [["Heart-rate spike", 87, 7], ["Oxygen drop", 95, 17], ["Fever", 96, 32.5], ["Irregular rhythm", 98, 14.5]],
+};
+
+function bar(label, pct, num, cls = "") {
+  return `<div class="bar"><span>${label}</span><div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-label="${label}">
+    <div class="fill ${cls}" style="width:${pct}%"></div></div><span class="num">${num}</span></div>`;
+}
+
+function renderResults() {
+  if ($("results").dataset.ready) return;
+  $("results").dataset.ready = 1;
+  $("results").innerHTML =
+    `<div><h3>Time to alert (seconds after onset)</h3>${RESULTS.latency.map(([n, s]) => bar(n, s / 20 * 100, s + " s")).join("")}</div>` +
+    `<div><h3>Detector comparison</h3>${RESULTS.detectors.map(([n, pr, rc, fa]) =>
+      `<div class="note" style="margin:10px 0 0"><b>${n}</b> · ${fa} false alarms</div>` +
+      bar("Precision", pr, pr + "%", pr < 90 ? "mid" : "") + bar("Recall", rc, rc + "%")).join("")}</div>` +
+    `<div><h3>Early warning: events caught, median lead</h3>${RESULTS.forecast.map(([n, c, s]) =>
+      bar(n, c, `${c}% · ${s} s`)).join("")}<div class="note">About 0.6 to 0.9 false warnings per hour per event type.</div></div>`;
+}
+
+function canvas(c) {   // sized, cleared, HiDPI-ready 2D context
+  const dpr = devicePixelRatio || 1, w = c.clientWidth, ht = c.clientHeight;
+  c.width = w * dpr; c.height = ht * dpr;
+  const g = c.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, ht);
+  return [g, w, ht];
+}
+
+function slope(v) {   // least-squares change per sample
+  const n = v.length, mx = (n - 1) / 2, my = v.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  v.forEach((y, i) => { num += (i - mx) * (y - my); den += (i - mx) ** 2; });
+  return den ? num / den : 0;
+}
+
+function draw(k, h) {
+  const c = $("c-" + k); if (!c) return;
+  const [g, w, ht] = canvas(c);
+  if (h.length < 2) return;
+  const vals = h.map(x => x[k]), exp = h.map(x => x["exp_" + k]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  exp.forEach(e => { if (e) { lo = Math.min(lo, e[0] - 2 * e[1]); hi = Math.max(hi, e[0] + 2 * e[1]); } });
+  if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+  const X = i => (i + HIST - h.length) / (HIST - 1) * w, Y = v => ht - 4 - (v - lo) / (hi - lo) * (ht - 8);
+  g.fillStyle = css("--band"); g.beginPath();                     // "your normal" band: expected ± 2 sd
+  let started = false;
+  exp.forEach((e, i) => { if (e) { const y = Y(e[0] + 2 * e[1]); started ? g.lineTo(X(i), y) : (g.moveTo(X(i), y), started = true); } });
+  for (let i = exp.length - 1; i >= 0; i--) if (exp[i]) g.lineTo(X(i), Y(exp[i][0] - 2 * exp[i][1]));
+  g.fill();
+  g.lineWidth = 1.6; g.lineJoin = "round";
+  for (let i = 1; i < h.length; i++) {                             // line coloured by tier at each moment
+    const t = h[i].tier;
+    g.strokeStyle = t === "alert" ? css("--alert") : t === "warning" ? css("--warn") : css("--accent");
+    g.beginPath(); g.moveTo(X(i - 1), Y(vals[i - 1])); g.lineTo(X(i), Y(vals[i])); g.stroke();
+  }
+}
+
+function renderWhy(p) {
+  const rows = Object.entries(ZNAME).map(([k, n]) => {
+    const z = p.z[k] ?? 0, pct = Math.min(100, z * 10), cls = z >= 5 ? "hi" : z >= 3.5 ? "mid" : "";
+    return `<div class="bar"><span>${n}</span><div class="track" role="meter" aria-valuemin="0" aria-valuemax="10" aria-valuenow="${z}" aria-label="${n} deviation">
+      <div class="fill ${cls}" style="width:${pct}%"></div><div class="mark" style="left:35%"></div><div class="mark" style="left:50%"></div></div>
+      <span class="num">${z.toFixed(1)}σ</span></div>`;
+  });
+  $("why").innerHTML = rows.join("") + (p.ml ? `<div class="note">ML pattern check: unusual combination of signals for ${p.name}.</div>` : "");
+}
+
+function renderForecast(p) {
+  // the forecaster was trained only on the moments BEFORE events; during an alert its output means nothing
+  if (p.tier === "alert") { $("fc").innerHTML = `<div class="note">Paused while an alert is active: forecasts predict what comes next, not what is already happening.</div>`; return; }
+  $("fc").innerHTML = Object.entries(p.forecast).map(([e, f]) => {
+    const pct = Math.round(f.p * 100);
+    return `<div class="bar"><span>${EV[e].replace(" (AFib)", "")}</span><div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${EV[e]} probability">
+      <div class="fill ${f.warning ? "hi" : f.p >= f.thr ? "mid" : ""}" style="width:${pct}%"></div><div class="mark" style="left:${f.thr * 100}%"></div></div>
+      <span class="num">${f.warning ? "▲ " : ""}${pct}%</span></div>`;
+  }).join("") || `<div class="note">Collecting 5 minutes of history…</div>`;
+}
+
+function renderInject(p) {
+  if ($("inject").dataset.ready) return;
+  $("inject").dataset.ready = 1;
+  $("inject").innerHTML = data.events.map(e => `<button class="${e === "cardiac_spike" ? "primary" : ""}" data-ev="${e}">${EV[e]}</button>`).join("")
+    + `<label><input type="checkbox" id="pre"> with warning signs first</label>`;
+  document.querySelectorAll("[data-ev]").forEach(b => b.onclick = async () => {
+    const r = await fetch("/api/inject", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pid: sel, event: b.dataset.ev, precursor: $("pre").checked }) });
+    const j = await r.json();
+    $("injMsg").textContent = r.ok ? `Injected ${EV[b.dataset.ev]} into ${sel}.` : (j.detail || "Could not inject.");
+  });
+}
+
+function renderLog() {
+  $("log").innerHTML = data.log.map(l => `<li><time>${new Date(l.t * 1000).toLocaleTimeString([], { hour12: false })}</time>
+    <span>${l.pid}</span><span>${l.kind === "inject" ? "" : badge(l.kind) + " "}${l.text}</span></li>`).join("")
+    || `<li><span></span><span></span><span class="truth">No alerts yet.</span></li>`;
+}
+
+function renderAll() {
+  if (!data.patients.length) return;
+  if (!sel) sel = data.patients[0].pid;
+  const p = data.patients.find(x => x.pid === sel);
+  const h = hist[p.pid] || [];
+  renderBanner(p); renderTiles(p); renderWhy(p); renderForecast(p); renderInject(p); renderLog();
+  renderScatter(h); renderDayNight(p); renderActivity(h, p); renderIrregular(h); renderFcHist(h, p); renderResults();
+  $("truth").textContent = `Simulator ground truth for ${p.pid} (demo only): ${p.truth === "normal" ? "normal" : EV[p.truth]}`;
+}
+
+async function start() {
+  const s = await (await fetch("/api/state")).json();
+  data = s; hist = s.history; renderAll();
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { $("conn").className = "dot"; $("connText").textContent = "Live · 1 reading per second"; };
+  es.onerror = () => { $("conn").className = "dot off"; $("connText").textContent = "Reconnecting…"; };
+  es.onmessage = ev => {
+    const s = JSON.parse(ev.data);
+    for (const [pid, pt] of Object.entries(s.points)) {
+      const h = hist[pid] ||= [];
+      if (!h.length || h[h.length - 1].t !== pt.t) { h.push(pt); if (h.length > HIST) h.shift(); }
+    }
+    data = s; renderAll();
+  };
+}
+addEventListener("resize", () => renderAll());
+start();
+</script>
+</body>
+</html>

@@ -27,6 +27,22 @@ def check_scripts():
     print("ok  stage self-checks (simulator, pipeline, detect, model)")
 
 
+def check_no_event_rejected():
+    """Safety: validation must never throw away a reading taken DURING an emergency (it once did: AFib HRV > 300 ms)."""
+    import random
+    from pipeline import is_valid
+    bad = 0
+    for seed in range(150):
+        rng = random.Random(seed)
+        p = Patient(rng.choice(list(PATIENTS)), seed=seed, start_hour=rng.choice([1.0, 14.0]))
+        for i in range(300):
+            if i == 50:
+                p.inject(rng.choice(list(EVENTS)))
+            bad += not is_valid(p.tick())
+    assert bad == 0, f"{bad} real readings rejected as glitches"
+    print("ok  validation: 0 of 45,000 readings (incl. 150 events, day and night) rejected")
+
+
 def check_rules_stress():
     fa = miss = 0
     for seed in range(30, 36):
@@ -96,8 +112,49 @@ def check_forecast():
     print(f"ok  forecast: warned {warned:.0%} of precursor events, {false:.2f} false/h, sudden {sudden:.0%}")
 
 
+def check_api():
+    """Stage 6: the live server end to end (no background loop; the test advances time itself). Monitors Ravi (P2)."""
+    from fastapi.testclient import TestClient
+    from app import MONITORED, create_app
+    app = create_app(run_loop=False)
+    pid = MONITORED[0]
+    with TestClient(app) as c:
+        w = app.state.ward["w"]
+        assert c.get("/").status_code == 200 and "Health Anomaly Monitor" in c.get("/").text
+        s = c.get("/api/state").json()
+        assert [p["pid"] for p in s["patients"]] == list(MONITORED) and all(len(h) >= 100 for h in s["history"].values())
+        assert all(p["tier"] in ("normal", "watch") for p in s["patients"]), "patient not calm after warm-up"
+        # chart data: day/night resting values (night HR lower), irregular flag and forecast probabilities per point
+        rest = s["patients"][0]["resting"]
+        assert rest["night"]["hr"] < rest["day"]["hr"], rest
+        last = s["history"][pid][-1]
+        assert "irr" in last and all(f"fc_{e}" in last for e in s["patients"][0]["forecast"]), last.keys()
+        assert c.post("/api/inject", json=dict(pid="P9", event="fever")).status_code == 400
+        assert c.post("/api/inject", json=dict(pid=pid, event="cardiac_spike")).status_code == 200
+        assert c.post("/api/inject", json=dict(pid=pid, event="fever")).status_code == 409   # one event at a time
+        for i in range(1, 6):
+            w.step()
+            if w.state[pid]["tier"] == "alert":
+                break
+        st = w.state[pid]
+        assert st["tier"] == "alert" and i <= 3 and "Heart rate" in st["reason"], (i, st["tier"], st["reason"])
+        for _ in range(150):                      # let the spike end and the alert clear
+            w.step()
+        assert w.state[pid]["tier"] != "alert", "alert did not clear after the event"
+        # warning signs first: early warning must show BEFORE the event itself starts
+        assert c.post("/api/inject", json=dict(pid=pid, event="hypoxia", precursor=True)).status_code == 200
+        early = None
+        for _ in range(80):
+            w.step()
+            st = w.state[pid]
+            if st["tier"] in ("warning", "alert") and early is None:
+                early = st["truth"]
+        assert early == "normal", f"first warning came only once the event was underway ({early})"
+    print("ok  api: spike alert within 3 s, alert clears, early warning before onset, 400/409 handled")
+
+
 if __name__ == "__main__":
-    for c in (check_scripts, check_rules_stress, check_interleaved_patients, check_ml_all_patients, check_scorecard,
-              check_forecast):
+    for c in (check_scripts, check_no_event_rejected, check_rules_stress, check_interleaved_patients, check_ml_all_patients, check_scorecard,
+              check_forecast, check_api):
         c()
     print("ALL OK")

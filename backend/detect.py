@@ -57,7 +57,7 @@ class Detector:
         avg = {s: sum(x[s] for x in recent) / len(recent) for s in SIGNALS}
         x = min(avg["accel"], X_CAP)
         regs = [self.base.setdefault((pid, bucket(r["hour"]), s), Reg()) for s in SCORED]
-        out = dict(pid=pid, t=r["t"], z={}, score=0.0, tier="normal", reason="")
+        out = dict(pid=pid, t=r["t"], z={}, expected={}, value={}, score=0.0, tier="normal", reason="")
 
         if r["accel"] >= FALL_G:
             self.fall[pid] = FALL_HOLD
@@ -87,6 +87,8 @@ class Detector:
         for s, g in zip(SCORED, regs):
             a, b, sd = g.fit()
             z = (avg[s] - (a + b * x)) / max(sd, STD_FLOOR[s])
+            out["expected"][s] = (round(a + b * x, 2), round(max(sd, STD_FLOOR[s]), 2))   # "your normal" right now
+            out["value"][s] = round(avg[s], 2)                                             # the smoothed value judged
             if s in ONE_SIDED:
                 z = max(z * ONE_SIDED[s], 0)
             out["z"][s] = round(min(abs(z), Z_CAP), 1)

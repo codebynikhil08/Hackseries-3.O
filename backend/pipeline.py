@@ -10,7 +10,7 @@ LIMITS = {
     "temp": (25, 43),
     "rr": (3, 60),
     "accel": (0, 20),
-    "hrv": (2, 300),    # ms, beat-to-beat variability
+    "hrv": (2, 600),    # ms, beat-to-beat variability (AFib can push RMSSD past 300; a tighter cap dropped real emergencies)
     "pi": (0.05, 20),   # %, perfusion index
 }
 

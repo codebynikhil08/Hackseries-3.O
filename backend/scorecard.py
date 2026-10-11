@@ -46,14 +46,12 @@ class Radar:
 
 def warm_radar(pids, seed):
     radar, ps = Radar(), {pid: Patient(pid, seed=seed + i) for i, pid in enumerate(pids)}
-    for start, ticks in ((14.0, 6000), (2.0, 3000)):   # day, then night
+    for start, ticks in ((2.0, 3000), (14.0, 6000)):   # night, then day; the scenario continues in daytime
         for p in ps.values():
             p.start_hour = start - p.t / 3600
         for _ in range(ticks):
             for p in ps.values():
                 radar.update(p.tick())
-    for p in ps.values():
-        p.start_hour = 14.0 - p.t / 3600
     radar.fit_ml()
     return radar, ps
 
@@ -66,7 +64,7 @@ def scenario(radar, p, ticks, rng, gap=(240, 420)):
             p.inject(rng.choice(list(EVENTS)))
             nxt = i + EVENTS[p.event] + rng.randint(*gap)
         r = p.tick()
-        res = radar.update(r)
+        res = radar.update(r) or dict(rules="rejected", ml=False, tier="rejected")   # a rejected reading never alerts
         out.append((r["label"], res["rules"] == "alert", res["ml"], res["tier"] == "alert"))
     return out
 

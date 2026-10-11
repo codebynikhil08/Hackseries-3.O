@@ -4,6 +4,7 @@ whether an event will START within the next H seconds (before any alert fires).
 Honest-evaluation setup: train / validation / test use DIFFERENT randomly generated people and
 DIFFERENT seeds. Thresholds are tuned on validation only; test people are touched once, for the report.
 """
+import csv
 import random
 from pathlib import Path
 
@@ -23,6 +24,7 @@ PERSIST, COOLDOWN = 3, 60
 SIG = ("hr", "spo2", "temp", "rr", "hrv", "pi")
 KEYS = SIG + ("accel", "hour", "irregular")
 MODEL_PATH = Path(__file__).with_name("forecast_model.joblib")
+DATA = Path(__file__).parent.parent / "data"   # train.csv / val.csv / test.csv: the training source of truth
 
 
 # ---------- features (identical code for training and live use) ----------
@@ -114,6 +116,44 @@ def stack(streams, ev, stride=1):
 def people(n, seed, tag):
     rng = random.Random(seed)
     return [random_profile(rng, f"{tag}{i}") for i in range(n)]
+
+
+# ---------- load a dataset file (same format export_data.py writes; real recordings can use it too) ----------
+def _log_from_states(state):
+    """Rebuild [event, onset t, end t, precursor lead] from the per-second `state` column."""
+    log, i, n = [], 0, len(state)
+    while i < n:
+        ev = state[i]
+        if ev in EVENTS and (i == 0 or state[i - 1] != ev):
+            j = i
+            while j + 1 < n and state[j + 1] == ev:
+                j += 1
+            k = i
+            while k > 0 and state[k - 1] == "precursor_" + ev:
+                k -= 1
+            log.append([ev, i + 1, j + 1, i - k])
+            i = j
+        i += 1
+    return log
+
+
+def load_streams(path):
+    """Read a dataset CSV into the same stream dicts build() makes. Needs columns: person, seed, hr, spo2, temp, rr,
+    hrv, pi, irregular, accel, hour, state (normal | precursor_X | X | decoy_Y) and the event_within_* targets."""
+    groups = {}
+    with open(path, newline="") as fh:
+        for row in csv.DictReader(fh):
+            groups.setdefault((row["person"], row["seed"]), []).append(row)
+    out = []
+    for rows in groups.values():
+        n = len(rows)
+        S = {k: [float(r[k]) for r in rows] for k in KEYS}
+        state = [r["state"] for r in rows]
+        cut = slice(BASE - 1, None)
+        y = {ev: np.array([r[f"event_within_{h}s_{ev}"] == "1" for r in rows])[cut] for ev, h in HORIZON.items()}
+        valid = np.array([s not in EVENTS for s in state])[cut]
+        out.append(dict(F=features(S), y=y, valid=valid, log=_log_from_states(state), S=S))
+    return out
 
 
 # ---------- warnings (episode logic shared by ML and the baseline) ----------
@@ -226,22 +266,26 @@ def evaluate(bundle, streams, label):
         print(f"   baseline {fmt(bl)}")
     return res
 
-
 if __name__ == "__main__":
     import sys
-    quick = "--quick" in sys.argv
-    n_tr, n_seed = (6, 3) if quick else (30, 8)
-    tr = build(people(n_tr, 1, "train"), range(100, 100 + n_seed))
-    va = build(people(12, 2, "val"), range(200, 205))
-    te = build(people(10 if not quick else 3, 3, "test"), range(300, 300 + (5 if not quick else 2)))
-    print(f"train {sum(len(s['F']) for s in tr)} rows / {n_tr} people; val {sum(len(s['F']) for s in va)} rows / 12 "
-          f"people; TEST {sum(len(s['F']) for s in te)} rows / {10 if not quick else 3} unseen people, unseen seeds")
+
+    if "--regen" in sys.argv or not (DATA / "test.csv").exists():
+        import export_data
+        export_data.main()                      # (re)write data/*.csv from the simulator
+    tr, va, te = (load_streams(DATA / f"{n}.csv") for n in ("train", "val", "test"))
+    print(f"training from {DATA.name}/*.csv: train {sum(len(s['F']) for s in tr)} rows / {len(tr)} streams; "
+          f"val {sum(len(s['F']) for s in va)} rows / {len(va)} streams; "
+          f"TEST {sum(len(s['F']) for s in te)} rows / {len(te)} streams (unseen people, unseen seeds)")
     b = train(tr, va)
     evaluate(b, va, "validation (used to pick thresholds)")
     res = evaluate(b, te, "TEST: unseen people + unseen seeds (never used for any choice)")
-    if not quick:
-        joblib.dump(b, MODEL_PATH)
-        print("saved", MODEL_PATH.name)
+    joblib.dump(b, MODEL_PATH)
+    print("saved", MODEL_PATH.name)
+
+    # the CSV round-trip changes nothing: loading a file gives the same features/labels as generating directly
+    g = build(people(10, 3, "test")[:1], range(300, 301))[0]
+    assert np.allclose(g["F"], te[0]["F"]) and (g["valid"] == te[0]["valid"]).all()
+    assert all((g["y"][k] == te[0]["y"][k]).all() for k in HORIZON) and g["log"] == te[0]["log"]
 
     # live Forecaster gives the same numbers as batch features (no train/serve skew)
     S, _, _ = make_stream(people(1, 9, "x")[0], 999, 400)
@@ -253,4 +297,4 @@ if __name__ == "__main__":
         assert r["auc"] > 0.7, f"{ev} AUC too low on unseen people"
         assert r["ml"]["warned"] >= r["baseline"]["warned"] - 0.05, f"{ev}: ML worse than the simple rule"
         assert r["ml"]["sudden_warned"] <= 0.15, f"{ev}: warns before SUDDEN events -> leak in the data"
-    print("\nOK")
+    print("OK")
