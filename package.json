@@ -1,5 +1,5 @@
 {
-  "name": "hackseries-3-o",
+  "name": "new-folder--3-",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,12 +10,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/three": "^0.186.0",
+    "autoprefixer": "^10.6.1",
+    "clsx": "^2.1.1",
     "gsap": "^3.15.0",
-    "lenis": "^1.3.26",
     "lucide-react": "^1.55.0",
+    "postcss": "^8.5.29",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "recharts": "^3.10.1",
+    "tailwindcss": "^4.3.3",
     "three": "^0.186.1"
   },
   "devDependencies": {
