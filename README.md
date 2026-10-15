@@ -4,7 +4,7 @@
 
 PulseGuard is an end-to-end wearable health-monitoring platform designed to detect unusual physiological patterns by learning an individual's personal baseline, analyzing multiple synchronized health signals, and generating explainable alerts.
 
-Wearables collect health data continuously, but frequent or insignificant notifications cause severe **alert fatigue**. PulseGuard eliminates alert fatigue by learning each individual's baseline physiology, factoring in kinetic activity ($g$-force) and circadian time of day, and evaluating deviations across multiple signals rather than isolated readings.
+Wearables collect health data continuously, but frequent or insignificant notifications cause severe **alert fatigue**. PulseGuard eliminates alert fatigue by learning each individual's baseline physiology, factoring in kinetic activity ($g$-force) and circadian time of day, and evaluating deviations across multiple signals rather than isolated reaadingjsjkfafufshjshjs.
 
 > **Project Status:** Fully Integrated Production Prototype. Features the Python ML simulation and detection pipeline (Rules + Isolation Forest), high-performance FastAPI streaming layer, interactive 3D smartwatch in Three.js / React Three Fiber, and clinical triage dashboard.
 
